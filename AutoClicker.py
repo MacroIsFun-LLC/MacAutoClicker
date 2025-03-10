@@ -3,108 +3,115 @@ from tkinter import ttk
 import threading
 import time
 import pyautogui
-import os
-from Quartz.CoreGraphics import CGEventCreateScrollWheelEvent, kCGEventScrollWheel, kCGEventLeftMouseDown, kCGEventLeftMouseUp, kCGMouseButtonLeft
-from pynput.mouse import Controller, Button, Controller as PynputController
+import Quartz
+from Quartz import (
+    CGEventCreateMouseEvent, CGEventPost,
+    kCGHIDEventTap, kCGEventLeftMouseDown, kCGEventLeftMouseUp, kCGMouseButtonLeft,
+    CGEventTapCreate, kCGHeadInsertEventTap, kCGEventTapOptionDefault, CGEventMaskBit,
+    kCGEventKeyDown, CFMachPortCreateRunLoopSource, CFRunLoopAddSource, CFRunLoopRun,
+    CGEventGetIntegerValueField, kCGKeyboardEventKeycode, CFRunLoopStop, CFRunLoopGetCurrent
+)
 
-# State variables
+# Global vars
 clicking = False
-delay = 0.05  # Default delay (50ms)
-mouse = Controller()
-pynput_mouse = PynputController()
+delay = 0.05
+running = True  # GUI running flag
 
 def mac_click(x, y):
-    """Simulate a native macOS click at the given coordinates."""
-    event_down = CGEventCreateMouseEvent(None, kCGEventLeftMouseDown, (x, y), kCGMouseButtonLeft)
-    event_up = CGEventCreateMouseEvent(None, kCGEventLeftMouseUp, (x, y), kCGMouseButtonLeft)
-    event_down.post()
-    event_up.post()
+    down = CGEventCreateMouseEvent(None, kCGEventLeftMouseDown, (x, y), kCGMouseButtonLeft)
+    up = CGEventCreateMouseEvent(None, kCGEventLeftMouseUp, (x, y), kCGMouseButtonLeft)
+    CGEventPost(kCGHIDEventTap, down)
+    CGEventPost(kCGHIDEventTap, up)
 
-def scroll_method_1():
-    """First Scroll Method: Using pyautogui."""
-    pyautogui.scroll(-50)  # Scroll down by 50 units
-
-def scroll_method_2():
-    """Second Scroll Method: Using pynput mouse controller."""
-    pynput_mouse.scroll(0, -1)  # Scroll down by 1 unit
-
-def scroll_method_3():
-    """Third Scroll Method: Using Quartz CoreGraphics for macOS."""
-    scroll_event = CGEventCreateScrollWheelEvent(None, kCGEventScrollWheel, 0, -1)
-    scroll_event.post()
+def click_loop():
+    global clicking
+    while clicking and running:
+        x, y = pyautogui.position()
+        mac_click(x, y)
+        time.sleep(delay)
 
 def start_clicking():
-    """Starts auto-clicking wherever the mouse is."""
     global clicking
     if not clicking:
         clicking = True
-        update_indicator(clicking_indicator, "green")
-        threading.Thread(target=press_mouse, daemon=True).start()
+        update_indicator("green")
+        threading.Thread(target=click_loop, daemon=True).start()
 
 def stop_clicking():
-    """Stops auto-clicking."""
     global clicking
     clicking = False
-    update_indicator(clicking_indicator, "red")
+    update_indicator("red")
 
-def press_mouse():
-    """Continuously clicks at the current mouse position."""
-    while clicking:
-        x, y = pyautogui.position()  # Get mouse position
-        try:
-            mac_click(x, y)  # Try Quartz click (macOS)
-        except:
-            mouse.position = (x, y)
-            mouse.click(Button.left, 1)  # Fallback to pynput click
-        time.sleep(delay)
-
-def update_indicator(indicator, color):
-    """Updates the UI indicator color."""
-    root.after(0, lambda: indicator_canvas.itemconfig(indicator, fill=color))
+def update_indicator(color):
+    if running:
+        root.after(0, lambda: indicator_canvas.itemconfig(indicator, fill=color))
 
 def update_delay(value):
-    """Updates the clicking speed based on slider input."""
     global delay
-    delay = float(value)  # Convert slider value to float
-    slider_label.config(text=f"Action Speed: {int(float(value) * 1000)} ms")
+    delay = float(value)
+    slider_label.config(text=f"Action Speed: {int(delay * 1000)} ms")
 
-def on_key_press(event):
-    """Handles keyboard shortcuts."""
-    if event.char == '[':  # Start clicking
-        start_clicking()
-    elif event.char == ']':  # Stop clicking
-        stop_clicking()
-    elif event.char == ';':  # Scroll down using Method 1
-        scroll_method_1()
-    elif event.char == "'":  # Scroll down using Method 2
-        scroll_method_2()
-    elif event.char == '\\':  # Scroll down using Method 3
-        scroll_method_3()
+# Global keyboard monitoring
+def key_event_handler(proxy, type_, event, refcon):
+    if type_ == kCGEventKeyDown:
+        keycode = CGEventGetIntegerValueField(event, kCGKeyboardEventKeycode)
+        if keycode == 33:  # '[' key
+            start_clicking()
+        elif keycode == 30:  # ']' key
+            stop_clicking()
+    return event
 
-# --- Tkinter UI Setup ---
+def start_key_listener():
+    tap = CGEventTapCreate(
+        Quartz.kCGSessionEventTap,
+        kCGHeadInsertEventTap,
+        kCGEventTapOptionDefault,
+        CGEventMaskBit(kCGEventKeyDown),
+        key_event_handler,
+        None
+    )
+    source = CFMachPortCreateRunLoopSource(None, tap, 0)
+    loop = CFRunLoopGetCurrent()
+    CFRunLoopAddSource(loop, source, Quartz.kCFRunLoopCommonModes)
+    Quartz.CGEventTapEnable(tap, True)
+
+    while running:
+        Quartz.CFRunLoopRun()
+
+# Tkinter GUI setup
 root = tk.Tk()
 root.title("Auto Clicker")
 root.geometry("300x200")
 
-# Exit button
-exit_button = ttk.Button(root, text="Exit", command=root.destroy)
+root.attributes('-topmost', True)
+root.after(1000, lambda: root.attributes('-topmost', False))
+
+exit_button = ttk.Button(root, text="Exit", command=lambda: root.quit())
 exit_button.pack(pady=10)
 
-# Indicator Canvas
 indicator_canvas = tk.Canvas(root, width=100, height=50)
-clicking_indicator = indicator_canvas.create_rectangle(0, 0, 100, 50, fill="red")
+indicator = indicator_canvas.create_rectangle(0, 0, 100, 50, fill="red")
 indicator_canvas.pack(pady=10)
 
-# Speed Control Slider & Label
 slider_label = ttk.Label(root, text="Action Speed: 50 ms")
 slider_label.pack()
 
 speed_slider = ttk.Scale(root, from_=0.05, to=1.0, orient="horizontal", command=update_delay)
-speed_slider.set(0.05)  # Default speed
+speed_slider.set(0.05)
 speed_slider.pack(pady=10)
 
-# Bind Keyboard Shortcuts
-root.bind('<KeyPress>', on_key_press)
+# Start key listener thread
+listener_thread = threading.Thread(target=start_key_listener, daemon=True)
+listener_thread.start()
 
-# Start Tkinter Event Loop
+# Handle graceful shutdown
+def on_close():
+    global running, clicking
+    running = False
+    clicking = False
+    CFRunLoopStop(CFRunLoopGetCurrent())
+    root.destroy()
+
+root.protocol("WM_DELETE_WINDOW", on_close)
+
 root.mainloop()
