@@ -7,9 +7,9 @@ from Quartz import (
     kCGHIDEventTap, kCGEventLeftMouseDown, kCGEventLeftMouseUp, kCGMouseButtonLeft
 )
 
-clicking = False
+clicking = False  # State of clicking
 click_lock = threading.Lock()
-delay = 0.05
+delay = 0.05  # Default delay
 
 def mac_click(x, y):
     """ Simulates a mouse click at (x, y) """
@@ -31,11 +31,20 @@ def click_loop():
                 time.sleep(0.05)  # Idle briefly when not clicking
 
 def start_clicking():
+    """ Starts clicking """
     global clicking
     with click_lock:
         clicking = True
+    print("Clicking started")  # Debug log
 
 def stop_clicking():
+    """ Stops clicking """
     global clicking
     with click_lock:
         clicking = False
+    print("Clicking stopped")  # Debug log
+
+def is_clicking():
+    """ Returns the current clicking state (for UI updates) """
+    global clicking
+    return clicking
